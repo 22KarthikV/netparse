@@ -21,6 +21,7 @@
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <poll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -99,6 +100,7 @@ static void print_events(FILE *o, unsigned ev, int json)
         {NP_FEV_RETRANS, "retransmission"}, {NP_FEV_OOO, "out-of-order"},
         {NP_FEV_DUP_ACK, "dup-ack"},        {NP_FEV_SACK, "sack"},
         {NP_FEV_ZERO_WIN, "zero-window"},   {NP_FEV_KEEPALIVE, "keep-alive"},
+        {NP_FEV_GAP, "gap"},
     };
     int first = 1;
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
@@ -329,12 +331,12 @@ static void dir_json(FILE *o, const np_flow_dir *d)
 {
     fprintf(o, "{\"packets\":%" PRIu64 ",\"bytes\":%" PRIu64 ",\"payload_bytes\":%" PRIu64
                ",\"retransmits\":%" PRIu32 ",\"out_of_order\":%" PRIu32
-               ",\"keepalives\":%" PRIu32 ",\"dup_acks\":%" PRIu32
+               ",\"keepalives\":%" PRIu32 ",\"gaps\":%" PRIu32 ",\"dup_acks\":%" PRIu32
                ",\"zero_windows\":%" PRIu32 ",\"sack_packets\":%" PRIu32
                ",\"sack_blocks\":%" PRIu32 ",\"syn\":%" PRIu32 ",\"fin\":%" PRIu32
                ",\"rst\":%" PRIu32 ",\"mss\":%u,\"wscale\":%d}",
             d->packets, d->bytes, d->payload_bytes, d->retransmits, d->out_of_order,
-            d->keepalives, d->dup_acks, d->zero_windows, d->sack_packets,
+            d->keepalives, d->gaps, d->dup_acks, d->zero_windows, d->sack_packets,
             d->sack_blocks, d->syn, d->fin, d->rst, d->mss,
             d->wscale == 0xff ? -1 : (int)d->wscale);
 }
@@ -503,6 +505,14 @@ static int run_live(struct ctx *c)
         struct tpacket3_hdr *h =
             (struct tpacket3_hdr *)(void *)((uint8_t *)bd + bd->hdr.bh1.offset_to_first_pkt);
         for (uint32_t i = 0; i < n && !stop_flag; i++) {
+            const struct sockaddr_ll *from = (const struct sockaddr_ll *)(const void *)(
+                (const uint8_t *)h + TPACKET_ALIGN(sizeof(struct tpacket3_hdr)));
+            if (from->sll_hatype == ARPHRD_LOOPBACK && from->sll_pkttype == PACKET_OUTGOING) {
+                /* Loopback delivers every frame twice (out and in); keep one
+                 * copy, as libpcap does. */
+                h = (struct tpacket3_hdr *)(void *)((uint8_t *)h + h->tp_next_offset);
+                continue;
+            }
             np_pcap_rec rec;
             rec.data = (const uint8_t *)h + h->tp_mac; /* zero-copy: kernel ring */
             rec.caplen = h->tp_snaplen;
