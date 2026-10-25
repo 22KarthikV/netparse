@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark libclang-rt-18-dev
+          sudo python3 -m pip install --break-system-packages scapy pytest
+
+      - name: Build (-Wall -Wextra -Werror -pedantic)
+        run: make CC=${{ matrix.cc }}
+
+      - name: Unit tests
+        run: make CC=${{ matrix.cc }} unit
+
+      - name: Unit tests under ASan + UBSan
+        run: make CC=${{ matrix.cc }} unit-san
+
+      - name: pytest (CLI built with ASan + UBSan; live capture test runs as root)
+        run: |
+          make CC=${{ matrix.cc }} unit-san
+          sudo -E env "PATH=$PATH" NETPARSE_BIN=$PWD/build-san/netparse \
+            python3 -m pytest -v tests/py
+
+      - name: Benchmark smoke run
+        run: ./build/bench_parse 3 0
+
+  fuzz-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang runtime
+        run: sudo apt-get update && sudo apt-get install -y libclang-rt-18-dev
+      - name: libFuzzer, 60 s per target
+        run: make fuzz FUZZ_CC=clang FUZZ_TIME=60
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcovr tshark
+          sudo python3 -m pip install --break-system-packages scapy pytest
+      - name: Coverage
+        run: make coverage
