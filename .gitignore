@@ -1,0 +1,21 @@
+# build outputs
+/build/
+/build-*/
+*.o
+*.a
+*.gcda
+*.gcno
+*.gcov
+
+# python
+__pycache__/
+.pytest_cache/
+tests/py/out/
+
+# fuzzing: generated corpora and findings stay local; fuzz/corpus/ holds the small seed set
+/fuzz/out/
+/fuzz/afl-out/
+crash-*
+leak-*
+timeout-*
+oom-*
