@@ -938,12 +938,12 @@ static void test_flow_retrans_ooo(void)
         {0, 1450, 1, NP_TCP_ACK, 100, 0, 50100}, /* partial overlap: retrans */
     };
     CHECK_EQ(feed(&t, &sg[0], &f) & NP_FEV_NEW_FLOW, NP_FEV_NEW_FLOW);
-    CHECK_EQ(feed(&t, &sg[1], &f), 0);
+    CHECK_EQ(feed(&t, &sg[1], &f), NP_FEV_GAP);
     CHECK_EQ(f->dir[f->initiator].nholes, 1);
     CHECK_EQ(feed(&t, &sg[2], &f), NP_FEV_OOO);
     CHECK_EQ(f->dir[f->initiator].nholes, 0);
     CHECK_EQ(feed(&t, &sg[3], &f), NP_FEV_RETRANS);
-    CHECK_EQ(feed(&t, &sg[4], &f), 0);
+    CHECK_EQ(feed(&t, &sg[4], &f), NP_FEV_GAP);
     CHECK_EQ(feed(&t, &sg[5], &f), NP_FEV_RETRANS);
     ev = feed(&t, &sg[6], &f);
     CHECK_EQ(ev, NP_FEV_RETRANS);
@@ -951,6 +951,7 @@ static void test_flow_retrans_ooo(void)
     CHECK_EQ(c->out_of_order, 1);
     CHECK_EQ(c->retransmits, 3);
     CHECK_EQ(c->max_seq_end, 1550);
+    CHECK_EQ(c->gaps, 2);
 }
 
 static void test_flow_hole_split_and_ack(void)
@@ -1012,6 +1013,7 @@ static void test_flow_dupack_sack_zwin_keepalive(void)
     CHECK_EQ(feed(&t, &ack, &f), 0);
     ack.win = 0xffff; /* encoded as window 0 by feed() */
     CHECK_EQ(feed(&t, &ack, &f), NP_FEV_ZERO_WIN);
+    CHECK_EQ(feed(&t, &ack, &f), NP_FEV_ZERO_WIN); /* repeated: not a dup ack */
     /* keep-alive: seq = max_seq_end - 1, 0 or 1 byte */
     struct seg ka = {0, 100, 1, NP_TCP_ACK, 0, 0, 2};
     CHECK_EQ(feed(&t, &ka, &f), NP_FEV_KEEPALIVE);
@@ -1039,7 +1041,7 @@ static void test_flow_dupack_sack_zwin_keepalive(void)
     CHECK_EQ(sv->sack_packets, 1);
     CHECK_EQ(sv->sack_blocks, 1);
     CHECK_EQ(sv->dup_acks, 2);
-    CHECK_EQ(sv->zero_windows, 1);
+    CHECK_EQ(sv->zero_windows, 2);
     CHECK_EQ(f->dir[f->initiator].keepalives, 2);
 }
 

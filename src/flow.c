@@ -229,6 +229,8 @@ static unsigned tcp_analyze(np_flow_table *t, np_flow *f, int side,
         } else if (seq_gt(seq, d->max_seq_end)) {
             add_hole(d, d->max_seq_end, seq, ts);
             d->max_seq_end = end;
+            d->gaps++;
+            ev |= NP_FEV_GAP;
         } else {
             uint64_t hts = 0;
             int inside = fill_holes(d, seq, end, &hts);
@@ -247,8 +249,11 @@ static unsigned tcp_analyze(np_flow_table *t, np_flow *f, int side,
     if (fl & NP_TCP_ACK) {
         uint32_t ack = pkt->tcp.ack;
         uint16_t win = pkt->tcp.window;
-        if (pkt->payload_len == 0 && !ctl && !keepalive && d->ack_valid &&
-            ack == d->last_ack && win == d->last_win) {
+        /* An ACK answering a keep-alive repeats the previous ACK by design;
+         * like Wireshark, do not count it as a duplicate. */
+        if (pkt->payload_len == 0 && !ctl && !keepalive && win != 0 &&
+            !peer->last_keepalive && d->ack_valid && ack == d->last_ack &&
+            win == d->last_win) {
             d->dup_acks++;
             ev |= NP_FEV_DUP_ACK;
         }
@@ -258,6 +263,7 @@ static unsigned tcp_analyze(np_flow_table *t, np_flow *f, int side,
         if (peer->nholes)
             ack_holes(peer, ack);
     }
+    d->last_keepalive = (uint8_t)keepalive;
     if (pkt->tcp.window == 0 && !ctl) {
         d->zero_windows++;
         ev |= NP_FEV_ZERO_WIN;

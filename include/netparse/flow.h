@@ -9,6 +9,7 @@
  * Per-direction TCP analysis (definitions used by this library):
  *   in-order       seq == highest sequence end seen so far (max_seq_end)
  *   gap            seq is after max_seq_end; [max_seq_end, seq) becomes a hole
+ *                  (Wireshark: "previous segment not captured")
  *   out-of-order   segment lies entirely inside a recorded hole and arrives
  *                  within ooo_threshold_ns (default 3 ms, as in Wireshark)
  *                  of the packet that opened the hole; later than that it
@@ -16,8 +17,9 @@
  *   retransmission segment starts before max_seq_end and is not wholly inside
  *                  a hole (covers bytes already seen), excluding keep-alives
  *   keep-alive     payload <= 1, seq == max_seq_end - 1, no SYN/FIN/RST
- *   duplicate ACK  no payload, no SYN/FIN/RST, same ack and window as the
- *                  previous packet in that direction
+ *   duplicate ACK  no payload, no SYN/FIN/RST, non-zero window, same ack
+ *                  and window as the previous packet in that direction,
+ *                  and not the answer to a keep-alive
  *   zero window    window field is 0 on a packet without SYN/FIN/RST
  *   SACK event     packet carries a SACK option (blocks counted separately)
  * Holes are dropped once the reverse direction acknowledges past them.
@@ -53,6 +55,7 @@ typedef struct np_flow_dir {
     uint32_t retransmits;
     uint32_t out_of_order;
     uint32_t keepalives;
+    uint32_t gaps;
     uint32_t dup_acks;
     uint32_t zero_windows;
     uint32_t sack_packets;
@@ -66,6 +69,7 @@ typedef struct np_flow_dir {
     uint16_t mss;            /* from SYN, 0 if not seen */
     uint8_t  wscale;         /* from SYN, 0xff if not seen */
     uint8_t  seq_valid, ack_valid;
+    uint8_t  last_keepalive; /* previous packet in this direction was one */
     uint8_t  nholes;
     np_seq_hole holes[NP_FLOW_MAX_HOLES];
 } np_flow_dir;
@@ -97,7 +101,8 @@ enum {
     NP_FEV_DUP_ACK    = 1u << 3,
     NP_FEV_SACK       = 1u << 4,
     NP_FEV_ZERO_WIN   = 1u << 5,
-    NP_FEV_KEEPALIVE  = 1u << 6
+    NP_FEV_KEEPALIVE  = 1u << 6,
+    NP_FEV_GAP        = 1u << 7
 };
 
 /* nslots must be a power of two >= 8. storage must hold nslots flows. */
