@@ -444,3 +444,17 @@ def test_text_output_format(tmp_path):
     assert lines[1] == "1700000000.750000 IP 192.168.1.20.53 > 192.168.1.10.5555: UDP, length 12"
     assert "Flows: 2" in out
     assert "2 packets, 0 malformed, reader: ok" in out
+
+
+def test_read_pcap_from_pipe(tmp_path):
+    """Non-regular files (pipes) are read into memory instead of mmap'd."""
+    import subprocess
+    from npharness import BIN
+    p = [frozen(Ether() / IP(src=C, dst=S) / tcp() / Raw(b"p" * 100)) for _ in range(300)]
+    stamp(p)
+    write_pcap(tmp_path / "pipe.pcap", p)
+    data = (tmp_path / "pipe.pcap").read_bytes()
+    out = subprocess.run([BIN, "-q", "-F", "-r", "/dev/stdin"], input=data,
+                         capture_output=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert b"300 packets, 0 malformed, reader: ok" in out.stdout

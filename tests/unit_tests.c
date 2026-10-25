@@ -848,6 +848,13 @@ static void test_pcap_file(void)
     CHECK_EQ(np_pcap_open_mem(&r, f.base, f.len), NP_PCAP_OK);
     np_pcap_unmap_file(&f);
     CHECK(f.base == NULL);
+    /* Empty file: success with no mapping; the reader then reports SHORT. */
+    fp = fopen(path, "wb");
+    fclose(fp);
+    CHECK_EQ(np_pcap_map_file(path, &f), NP_PCAP_OK);
+    CHECK(f.base == NULL && f.len == 0);
+    CHECK_EQ(np_pcap_open_mem(&r, f.base, f.len), NP_PCAP_ERR_SHORT);
+    np_pcap_unmap_file(&f);
     remove(path);
 }
 
@@ -981,6 +988,26 @@ static void test_flow_hole_split_and_ack(void)
     a.len = 400;
     CHECK_EQ(feed(&t, &a, &f), NP_FEV_OOO);
     CHECK_EQ(f->dir[f->initiator].nholes, 0);
+}
+
+static void test_flow_hole_partial_overlap(void)
+{
+    np_flow_table t;
+    np_flow_table_init(&t, slots, 64);
+    np_flow *f = NULL;
+    struct seg a = {0, 0, 1, NP_TCP_ACK, 100, 0, 0};
+    feed(&t, &a, &f);
+    a.seq = 1000; /* hole [100,1000) */
+    feed(&t, &a, &f);
+    a.seq = 50; /* [50,150): overlaps seen data and the hole's left edge */
+    CHECK_EQ(feed(&t, &a, &f), NP_FEV_RETRANS);
+    const np_flow_dir *c = &f->dir[f->initiator];
+    CHECK_EQ(c->nholes, 1);
+    CHECK_EQ(c->holes[0].left, 150);
+    a.seq = 950; /* [950,1050): overlaps the hole's right edge */
+    CHECK_EQ(feed(&t, &a, &f), NP_FEV_RETRANS);
+    CHECK_EQ(c->holes[0].left, 150);
+    CHECK_EQ(c->holes[0].right, 950);
 }
 
 static void test_flow_hole_overflow(void)
@@ -1186,6 +1213,7 @@ int main(void)
     RUN(test_flow_handshake_inorder);
     RUN(test_flow_retrans_ooo);
     RUN(test_flow_hole_split_and_ack);
+    RUN(test_flow_hole_partial_overlap);
     RUN(test_flow_hole_overflow);
     RUN(test_flow_dupack_sack_zwin_keepalive);
     RUN(test_flow_syn_retrans_and_wrap);
